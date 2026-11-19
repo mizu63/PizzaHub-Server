@@ -2,13 +2,15 @@ import "dotenv/config";
 import testRoutes from "./routes/test.routes.js";
 import express from "express";
 import cors from "cors";
-
+import menuRoutes from "./routes/menu.routes.js";
 import { connectDB } from "./config/db.js";
 import { auth } from "./config/auth.js";
 import { toNodeHandler } from "better-auth/node";
-
+import adminRoutes from "./routes/admin.routes.js";
 const app = express();
 app.use("/api/test", testRoutes);
+app.use("/api/menu", menuRoutes);
+app.use("/api/admin", adminRoutes);
 app.use(
   cors({
     origin: process.env.CLIENT_URL,
