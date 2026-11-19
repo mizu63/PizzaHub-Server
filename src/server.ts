@@ -12,9 +12,9 @@ import vendorRoutes from "./routes/vendor.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import userRoutes from "./routes/user.routes.js";
-
-
-
+import transactionRoutes from "./routes/transaction.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
+import profileRoutes from "./routes/profile.routes.js";
 
 const app = express();
 app.use("/api/test", testRoutes);
@@ -25,6 +25,9 @@ app.use("/api/vendor", vendorRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
 app.use("/api/webhooks", webhookRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/profile", profileRoutes);
 app.use(
   cors({
     origin: process.env.CLIENT_URL,
