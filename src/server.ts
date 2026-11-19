@@ -15,7 +15,7 @@ import userRoutes from "./routes/user.routes.js";
 import transactionRoutes from "./routes/transaction.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
-
+import imageRoutes from "./routes/image.routes.js";
 const app = express();
 app.use("/api/test", testRoutes);
 app.use("/api/menu", menuRoutes);
@@ -28,6 +28,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/transactions", transactionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/profile", profileRoutes);
+app.use("/api/images", imageRoutes);
 app.use(
   cors({
     origin: process.env.CLIENT_URL,

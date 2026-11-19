@@ -73,6 +73,7 @@ export const getAllUsers: RequestHandler = async (
 };
 
 // Admin: Block or unblock a user
+
 export const updateUserBlockStatus: RequestHandler = async (
   req,
   res
@@ -96,6 +97,20 @@ export const updateUserBlockStatus: RequestHandler = async (
       res.status(400).json({
         success: false,
         message: "isBlocked must be true or false",
+      });
+      return;
+    }
+
+    // Prevent admin from blocking their own account
+    const currentAdmin = res.locals.user as {
+      id: string;
+      role: string;
+    };
+
+    if (id === currentAdmin.id && isBlocked === true) {
+      res.status(403).json({
+        success: false,
+        message: "You cannot block your own admin account",
       });
       return;
     }

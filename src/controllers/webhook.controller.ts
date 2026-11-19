@@ -14,6 +14,59 @@ const getStripe = (): Stripe => {
   return new Stripe(secretKey);
 };
 
+// Update vendor subscription
+const updateVendorSubscription = async (
+  subscription: Stripe.Subscription
+) => {
+  const vendorId = subscription.metadata?.vendorId;
+
+  if (!vendorId) {
+    throw new Error("Vendor ID missing from subscription metadata");
+  }
+
+  const db = getDB();
+
+  const vendor = await db.collection("user").findOne({
+    id: vendorId,
+    role: "vendor",
+  });
+
+  if (!vendor) {
+    throw new Error(`Vendor not found: ${vendorId}`);
+  }
+
+  const isActive =
+    subscription.status === "active" ||
+    subscription.status === "trialing";
+
+  const periodEnd =
+    subscription.items.data[0]?.current_period_end;
+
+  const updateData: Record<string, unknown> = {
+    subscriptionPlan: isActive ? "premium" : "free",
+    updatedAt: new Date(),
+  };
+
+  if (isActive && periodEnd) {
+    updateData.subscriptionExpiresAt = new Date(
+      periodEnd * 1000
+    );
+  } else {
+    updateData.subscriptionExpiresAt = null;
+  }
+
+  await db.collection("user").updateOne(
+    {
+      id: vendorId,
+      role: "vendor",
+    },
+    {
+      $set: updateData,
+    }
+  );
+};
+
+// Stripe Webhook
 export const stripeWebhook: RequestHandler = async (
   req,
   res
@@ -46,6 +99,9 @@ export const stripeWebhook: RequestHandler = async (
   }
 
   try {
+    const db = getDB();
+
+    // 1. Checkout completed
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
@@ -64,22 +120,18 @@ export const stripeWebhook: RequestHandler = async (
           ? session.subscription
           : session.subscription?.id;
 
-      const email =
-        session.customer_details?.email ??
-        session.customer_email;
-
-      if (!vendorId || !subscriptionId || !email) {
-        console.error("Missing subscription information:", session.id);
-
+      if (!vendorId || !subscriptionId) {
         res.status(400).send("Missing subscription information");
         return;
       }
 
-      const stripe = getStripe();
+      const subscription = await getStripe()
+        .subscriptions.retrieve(subscriptionId);
 
-      const subscription = await stripe.subscriptions.retrieve(
-        subscriptionId
-      );
+      if (subscription.metadata.vendorId !== vendorId) {
+        res.status(400).send("Subscription vendor mismatch");
+        return;
+      }
 
       if (
         subscription.status !== "active" &&
@@ -92,64 +144,77 @@ export const stripeWebhook: RequestHandler = async (
         return;
       }
 
-      const db = getDB();
-
-      // Prevent duplicate processing of the same Checkout Session
-      const existingTransaction = await db
-        .collection("transactions")
-        .findOne({
-          stripeSessionId: session.id,
-        });
-
-      if (existingTransaction) {
-        res.status(200).json({
-          received: true,
-          message: "Transaction already processed",
-        });
-        return;
-      }
-
-      // Confirm that the account is the intended vendor
       const vendor = await db.collection("user").findOne({
-        email,
+        id: vendorId,
         role: "vendor",
       });
 
       if (!vendor) {
-        console.error("Vendor not found for subscription:", vendorId);
-
         res.status(400).send("Vendor account not found");
         return;
       }
 
-      const periodEnd = subscription.items.data[0]?.current_period_end;
+      await db.collection("transactions").updateOne(
+        { stripeSessionId: session.id },
+        {
+          $setOnInsert: {
+            vendorId,
+            plan: "premium",
+            amount: (session.amount_total ?? 0) / 100,
+            currency: session.currency ?? "usd",
+            stripeSessionId: session.id,
+            stripeSubscriptionId: subscriptionId,
+            status: "completed",
+            createdAt: new Date(),
+          },
+        },
+        { upsert: true }
+      );
 
-      const subscriptionExpiresAt = periodEnd
-        ? new Date(periodEnd * 1000)
-        : undefined;
+      await updateVendorSubscription(subscription);
+    }
 
-      await db.collection("transactions").insertOne({
-        vendorId,
-        plan: "premium",
-        amount: (session.amount_total ?? 0) / 100,
-        currency: session.currency ?? "usd",
-        stripeSessionId: session.id,
-        stripeSubscriptionId: subscriptionId,
-        status: "completed",
-        createdAt: new Date(),
-      });
+    // 2. Subscription updated
+    else if (event.type === "customer.subscription.updated") {
+      const subscription = event.data.object as Stripe.Subscription;
+
+      await updateVendorSubscription(subscription);
+    }
+
+    // 3. Subscription deleted
+    else if (event.type === "customer.subscription.deleted") {
+      const subscription = event.data.object as Stripe.Subscription;
+
+      const vendorId = subscription.metadata?.vendorId;
+
+      if (!vendorId) {
+        res.status(400).send("Vendor ID missing");
+        return;
+      }
 
       await db.collection("user").updateOne(
         {
-          email,
+          id: vendorId,
           role: "vendor",
         },
         {
           $set: {
-            subscriptionPlan: "premium",
-            ...(subscriptionExpiresAt
-              ? { subscriptionExpiresAt }
-              : {}),
+            subscriptionPlan: "free",
+            subscriptionExpiresAt: null,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      await db.collection("transactions").updateMany(
+        {
+          stripeSubscriptionId: subscription.id,
+          status: "completed",
+        },
+        {
+          $set: {
+            status: "cancelled",
+            updatedAt: new Date(),
           },
         }
       );

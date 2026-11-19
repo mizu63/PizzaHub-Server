@@ -20,6 +20,15 @@ const router = Router();
 // Public: Get all approved menu items
 router.get("/", getAllMenuItems);
 
+// Vendor: Get own menu items
+// Must be before /:id
+router.get(
+  "/vendor/my-items",
+  authenticate,
+  authorizeRoles("vendor"),
+  getMyMenuItems
+);
+
 // Public: Get a single approved menu item
 router.get("/:id", getMenuItemById);
 
@@ -29,14 +38,6 @@ router.post(
   authenticate,
   authorizeRoles("vendor"),
   createMenuItem
-);
-
-// Vendor: Get own menu items
-router.get(
-  "/vendor/my-items",
-  authenticate,
-  authorizeRoles("vendor"),
-  getMyMenuItems
 );
 
 // Vendor: Update own menu item
