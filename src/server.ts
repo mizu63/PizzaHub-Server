@@ -7,10 +7,24 @@ import { connectDB } from "./config/db.js";
 import { auth } from "./config/auth.js";
 import { toNodeHandler } from "better-auth/node";
 import adminRoutes from "./routes/admin.routes.js";
+import orderRoutes from "./routes/order.routes.js";
+import vendorRoutes from "./routes/vendor.routes.js";
+import subscriptionRoutes from "./routes/subscription.routes.js";
+import webhookRoutes from "./routes/webhook.routes.js";
+import userRoutes from "./routes/user.routes.js";
+
+
+
+
 const app = express();
 app.use("/api/test", testRoutes);
 app.use("/api/menu", menuRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/vendor", vendorRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
+app.use("/api/webhooks", webhookRoutes);
+app.use("/api/users", userRoutes);
 app.use(
   cors({
     origin: process.env.CLIENT_URL,
