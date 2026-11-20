@@ -1,4 +1,3 @@
-
 import { Router, raw } from "express";
 
 import {
@@ -7,7 +6,6 @@ import {
 
 const router = Router();
 
-// Stripe requires the raw request body for signature verification
 router.post(
   "/stripe",
   raw({ type: "application/json" }),
