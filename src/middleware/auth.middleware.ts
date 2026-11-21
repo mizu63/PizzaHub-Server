@@ -1,6 +1,7 @@
 
 import type { RequestHandler } from "express";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { ObjectId } from "mongodb";
 
 import { getDB } from "../config/db.js";
 
@@ -45,8 +46,7 @@ export const authenticate: RequestHandler = async (
 
     if (
       typeof payload.sub !== "string" ||
-      typeof payload.email !== "string" ||
-      typeof payload.role !== "string"
+      typeof payload.email !== "string"
     ) {
       res.status(401).json({
         success: false,
@@ -55,19 +55,19 @@ export const authenticate: RequestHandler = async (
       return;
     }
 
-    // Check current user status from MongoDB
+    if (!ObjectId.isValid(payload.sub)) {
+      res.status(401).json({
+        success: false,
+        message: "Invalid user ID",
+      });
+      return;
+    }
+
     const dbUser = await getDB()
       .collection("user")
-      .findOne(
-        { id: payload.sub },
-        {
-          projection: {
-            email: 1,
-            role: 1,
-            isBlocked: 1,
-          },
-        }
-      );
+      .findOne({
+        _id: new ObjectId(payload.sub),
+      });
 
     if (!dbUser) {
       res.status(401).json({
@@ -85,7 +85,6 @@ export const authenticate: RequestHandler = async (
       return;
     }
 
-    // Use current database role, not only the JWT role
     if (
       typeof dbUser.email !== "string" ||
       typeof dbUser.role !== "string" ||
@@ -99,7 +98,7 @@ export const authenticate: RequestHandler = async (
     }
 
     res.locals.user = {
-      id: payload.sub,
+      id: dbUser._id.toString(),
       email: dbUser.email,
       role: dbUser.role,
     } satisfies AuthenticatedUser;

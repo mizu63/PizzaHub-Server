@@ -43,10 +43,10 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       role: {
-        type: "string",
+        type: ["customer", "vendor"],
         required: false,
         defaultValue: "customer",
-        input: false,
+        input: true,
       },
 
       isBlocked: {
@@ -79,14 +79,14 @@ export const auth = betterAuth({
 
   // JWT Plugin
   plugins: [
-  jwt({
-    jwt: {
-      definePayload: ({ user }) => ({
-        id: user.id,
-        email: user.email,
-        role: user.role,
-      }),
-    },
-  }),
-],
+    jwt({
+      jwt: {
+        definePayload: ({ user }) => ({
+          id: user.id,
+          email: user.email,
+          role: user.role,
+        }),
+      },
+    }),
+  ],
 });
