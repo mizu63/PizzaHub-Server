@@ -36,8 +36,18 @@ export const getAllUsers: RequestHandler = async (
 
     if (typeof search === "string" && search.trim()) {
       filter.$or = [
-        { name: { $regex: search.trim(), $options: "i" } },
-        { email: { $regex: search.trim(), $options: "i" } },
+        {
+          name: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
+        {
+          email: {
+            $regex: search.trim(),
+            $options: "i",
+          },
+        },
       ];
     }
 
@@ -73,7 +83,6 @@ export const getAllUsers: RequestHandler = async (
 };
 
 // Admin: Block or unblock a user
-
 export const updateUserBlockStatus: RequestHandler = async (
   req,
   res
@@ -81,7 +90,8 @@ export const updateUserBlockStatus: RequestHandler = async (
   try {
     const id = req.params.id;
 
-    if (typeof id !== "string" || !id.trim()) {
+    // Validate MongoDB ObjectId
+    if (typeof id !== "string" || !ObjectId.isValid(id)) {
       res.status(400).json({
         success: false,
         message: "Invalid user ID",
@@ -118,7 +128,7 @@ export const updateUserBlockStatus: RequestHandler = async (
     const result = await getDB()
       .collection<UserRecord>("user")
       .updateOne(
-        { id },
+        { _id: new ObjectId(id) },
         {
           $set: {
             isBlocked,
