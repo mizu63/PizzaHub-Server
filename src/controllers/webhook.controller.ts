@@ -1,6 +1,7 @@
 
 import type { RequestHandler } from "express";
 import Stripe from "stripe";
+import { ObjectId } from "mongodb";
 
 import { getDB } from "../config/db.js";
 
@@ -14,6 +15,24 @@ const getStripe = (): Stripe => {
   return new Stripe(secretKey);
 };
 
+// Find vendor using Better Auth user ID
+const findVendor = async (vendorId: string) => {
+  const db = getDB();
+
+  const conditions: Record<string, unknown>[] = [
+    { id: vendorId },
+  ];
+
+  if (ObjectId.isValid(vendorId)) {
+    conditions.push({ _id: new ObjectId(vendorId) });
+  }
+
+  return db.collection("user").findOne({
+    $or: conditions,
+    role: "vendor",
+  });
+};
+
 // Update vendor subscription
 const updateVendorSubscription = async (
   subscription: Stripe.Subscription
@@ -25,14 +44,10 @@ const updateVendorSubscription = async (
   }
 
   const db = getDB();
-
-  const vendor = await db.collection("user").findOne({
-    id: vendorId,
-    role: "vendor",
-  });
+  const vendor = await findVendor(vendorId);
 
   if (!vendor) {
-    throw new Error(`Vendor not found: ${vendorId}`);
+    throw new Error("Vendor account not found for subscription");
   }
 
   const isActive =
@@ -45,24 +60,21 @@ const updateVendorSubscription = async (
   const updateData: Record<string, unknown> = {
     subscriptionPlan: isActive ? "premium" : "free",
     updatedAt: new Date(),
+    subscriptionExpiresAt:
+      isActive && periodEnd
+        ? new Date(periodEnd * 1000)
+        : null,
   };
 
-  if (isActive && periodEnd) {
-    updateData.subscriptionExpiresAt = new Date(
-      periodEnd * 1000
-    );
-  } else {
-    updateData.subscriptionExpiresAt = null;
-  }
-
   await db.collection("user").updateOne(
-    {
-      id: vendorId,
-      role: "vendor",
-    },
-    {
-      $set: updateData,
-    }
+    { _id: vendor._id },
+    { $set: updateData }
+  );
+
+  console.log(
+    `Vendor subscription updated: ${vendorId} -> ${
+      isActive ? "premium" : "free"
+    }`
   );
 };
 
@@ -74,11 +86,13 @@ export const stripeWebhook: RequestHandler = async (
   const signature = req.headers["stripe-signature"];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
+  // Verify raw body and signature
   if (
     typeof signature !== "string" ||
     !webhookSecret ||
     !Buffer.isBuffer(req.body)
   ) {
+    console.error("Invalid webhook request");
     res.status(400).send("Invalid webhook request");
     return;
   }
@@ -93,7 +107,6 @@ export const stripeWebhook: RequestHandler = async (
     );
   } catch (error) {
     console.error("Stripe Signature Error:", error);
-
     res.status(400).send("Webhook signature verification failed");
     return;
   }
@@ -105,15 +118,15 @@ export const stripeWebhook: RequestHandler = async (
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
 
-      if (
-        session.mode !== "subscription" ||
-        session.metadata?.plan !== "premium"
-      ) {
+      console.log("Checkout session completed:", session.id);
+
+      if (session.mode !== "subscription") {
         res.status(200).json({ received: true });
         return;
       }
 
-      const vendorId = session.metadata.vendorId;
+      const vendorId = session.metadata?.vendorId;
+      const plan = session.metadata?.plan;
 
       const subscriptionId =
         typeof session.subscription === "string"
@@ -121,57 +134,74 @@ export const stripeWebhook: RequestHandler = async (
           : session.subscription?.id;
 
       if (!vendorId || !subscriptionId) {
+        console.error("Missing subscription information:", {
+          hasVendorId: Boolean(vendorId),
+          hasSubscriptionId: Boolean(subscriptionId),
+        });
+
         res.status(400).send("Missing subscription information");
         return;
       }
 
+      if (plan !== "premium") {
+        console.error("Invalid subscription plan:", plan);
+        res.status(400).send("Invalid subscription plan");
+        return;
+      }
+
+      // Retrieve Stripe subscription
       const subscription = await getStripe()
         .subscriptions.retrieve(subscriptionId);
 
-      if (subscription.metadata.vendorId !== vendorId) {
+      if (
+        subscription.metadata?.vendorId &&
+        subscription.metadata.vendorId !== vendorId
+      ) {
+        console.error("Subscription vendor mismatch");
         res.status(400).send("Subscription vendor mismatch");
         return;
       }
 
-      if (
-        subscription.status !== "active" &&
-        subscription.status !== "trialing"
-      ) {
-        res.status(200).json({
-          received: true,
-          message: "Subscription is not active",
-        });
-        return;
-      }
-
-      const vendor = await db.collection("user").findOne({
-        id: vendorId,
-        role: "vendor",
-      });
+      // Find vendor
+      const vendor = await findVendor(vendorId);
 
       if (!vendor) {
+        console.error("Vendor account not found:", vendorId);
         res.status(400).send("Vendor account not found");
         return;
       }
 
-      await db.collection("transactions").updateOne(
-        { stripeSessionId: session.id },
-        {
-          $setOnInsert: {
-            vendorId,
-            plan: "premium",
-            amount: (session.amount_total ?? 0) / 100,
-            currency: session.currency ?? "usd",
-            stripeSessionId: session.id,
-            stripeSubscriptionId: subscriptionId,
-            status: "completed",
-            createdAt: new Date(),
+      // Save transaction only after Stripe confirms active subscription
+      if (
+        subscription.status === "active" ||
+        subscription.status === "trialing"
+      ) {
+        await db.collection("transactions").updateOne(
+          { stripeSessionId: session.id },
+          {
+            $setOnInsert: {
+              vendorId,
+              plan: "premium",
+              amount: (session.amount_total ?? 0) / 100,
+              currency: session.currency ?? "usd",
+              stripeSessionId: session.id,
+              stripeSubscriptionId: subscriptionId,
+              status: "completed",
+              createdAt: new Date(),
+            },
           },
-        },
-        { upsert: true }
-      );
+          { upsert: true }
+        );
 
-      await updateVendorSubscription(subscription);
+        await updateVendorSubscription(subscription);
+
+        console.log("Premium transaction saved:", session.id);
+      } else {
+        console.log(
+          "Subscription is not active:",
+          subscription.status
+        );
+      }
     }
 
     // 2. Subscription updated
@@ -184,27 +214,24 @@ export const stripeWebhook: RequestHandler = async (
     // 3. Subscription deleted
     else if (event.type === "customer.subscription.deleted") {
       const subscription = event.data.object as Stripe.Subscription;
-
       const vendorId = subscription.metadata?.vendorId;
 
-      if (!vendorId) {
-        res.status(400).send("Vendor ID missing");
-        return;
-      }
+      if (vendorId) {
+        const vendor = await findVendor(vendorId);
 
-      await db.collection("user").updateOne(
-        {
-          id: vendorId,
-          role: "vendor",
-        },
-        {
-          $set: {
-            subscriptionPlan: "free",
-            subscriptionExpiresAt: null,
-            updatedAt: new Date(),
-          },
+        if (vendor) {
+          await db.collection("user").updateOne(
+            { _id: vendor._id },
+            {
+              $set: {
+                subscriptionPlan: "free",
+                subscriptionExpiresAt: null,
+                updatedAt: new Date(),
+              },
+            }
+          );
         }
-      );
+      }
 
       await db.collection("transactions").updateMany(
         {
@@ -218,11 +245,11 @@ export const stripeWebhook: RequestHandler = async (
           },
         }
       );
+
+      console.log("Subscription cancelled:", subscription.id);
     }
 
-    res.status(200).json({
-      received: true,
-    });
+    res.status(200).json({ received: true });
   } catch (error) {
     console.error("Stripe Webhook Processing Error:", error);
 

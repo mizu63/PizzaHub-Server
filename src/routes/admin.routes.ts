@@ -5,6 +5,7 @@ import {
   getAllMenuItemsForAdmin,
   updateMenuItemStatus,
   getAdminDashboardStats,
+  getAllTransactions,
 } from "../controllers/admin.controller.js";
 
 import {
@@ -19,6 +20,9 @@ router.use(authenticate, authorizeRoles("admin"));
 
 // Admin: Get Dashboard Statistics
 router.get("/stats", getAdminDashboardStats);
+
+// Admin: Get all transactions
+router.get("/transactions", getAllTransactions);
 
 // Admin: Get all menu items
 router.get("/menu", getAllMenuItemsForAdmin);
