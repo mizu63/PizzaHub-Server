@@ -4,6 +4,7 @@ import { Router } from "express";
 import {
   getAllMenuItemsForAdmin,
   updateMenuItemStatus,
+  getAdminDashboardStats,
 } from "../controllers/admin.controller.js";
 
 import {
@@ -15,6 +16,9 @@ const router = Router();
 
 // All admin routes require admin authentication
 router.use(authenticate, authorizeRoles("admin"));
+
+// Admin: Get Dashboard Statistics
+router.get("/stats", getAdminDashboardStats);
 
 // Admin: Get all menu items
 router.get("/menu", getAllMenuItemsForAdmin);

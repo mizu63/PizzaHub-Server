@@ -27,28 +27,51 @@ export const getAllUsers: RequestHandler = async (
 
     const filter: Record<string, unknown> = {};
 
+    // Role filter
     if (
       typeof role === "string" &&
       ["customer", "vendor", "admin"].includes(role)
     ) {
-      filter.role = role;
+      if (role === "customer") {
+        filter.$or = [
+          { role: "customer" },
+          { role: { $exists: false } },
+          { role: null },
+          { role: "" },
+        ];
+      } else {
+        filter.role = role;
+      }
     }
 
+    // Search filter
     if (typeof search === "string" && search.trim()) {
-      filter.$or = [
-        {
-          name: {
-            $regex: search.trim(),
-            $options: "i",
+      const searchFilter = {
+        $or: [
+          {
+            name: {
+              $regex: search.trim(),
+              $options: "i",
+            },
           },
-        },
-        {
-          email: {
-            $regex: search.trim(),
-            $options: "i",
+          {
+            email: {
+              $regex: search.trim(),
+              $options: "i",
+            },
           },
-        },
-      ];
+        ],
+      };
+
+      if (filter.$or) {
+        filter.$and = [
+          { $or: filter.$or as Record<string, unknown>[] },
+          searchFilter,
+        ];
+        delete filter.$or;
+      } else {
+        filter.$or = searchFilter.$or;
+      }
     }
 
     const users = await getDB()
@@ -67,10 +90,15 @@ export const getAllUsers: RequestHandler = async (
       .sort({ createdAt: -1 })
       .toArray();
 
+    const formattedUsers = users.map((user) => ({
+      ...user,
+      role: user.role || "customer",
+    }));
+
     res.status(200).json({
       success: true,
-      total: users.length,
-      data: users,
+      total: formattedUsers.length,
+      data: formattedUsers,
     });
   } catch (error) {
     console.error("Get All Users Error:", error);
@@ -90,7 +118,6 @@ export const updateUserBlockStatus: RequestHandler = async (
   try {
     const id = req.params.id;
 
-    // Validate MongoDB ObjectId
     if (typeof id !== "string" || !ObjectId.isValid(id)) {
       res.status(400).json({
         success: false,
@@ -111,7 +138,6 @@ export const updateUserBlockStatus: RequestHandler = async (
       return;
     }
 
-    // Prevent admin from blocking their own account
     const currentAdmin = res.locals.user as {
       id: string;
       role: string;

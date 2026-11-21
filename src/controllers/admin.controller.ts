@@ -120,4 +120,77 @@ export const updateMenuItemStatus: RequestHandler = async (
   }
 };
 
+// Admin: Get Dashboard Statistics
+export const getAdminDashboardStats: RequestHandler = async (
+  _req,
+  res
+) => {
+  try {
+    const db = getDB();
 
+    const usersCollection = db.collection("user");
+    const menuCollection = getMenuCollection();
+    const transactionsCollection = db.collection("transactions");
+
+    const [
+      totalUsers,
+      customers,
+      vendors,
+      admins,
+      totalMenuItems,
+      pendingMenuItems,
+      approvedMenuItems,
+      totalTransactions,
+      revenueResult,
+    ] = await Promise.all([
+      usersCollection.countDocuments(),
+      usersCollection.countDocuments({
+        $or: [
+          { role: "customer" },
+          { role: { $exists: false } },
+          { role: null },
+          { role: "" },
+        ],
+      }),
+      usersCollection.countDocuments({ role: "vendor" }),
+      usersCollection.countDocuments({ role: "admin" }),
+      menuCollection.countDocuments(),
+      menuCollection.countDocuments({ status: "pending" }),
+      menuCollection.countDocuments({ status: "approved" }),
+      transactionsCollection.countDocuments(),
+      transactionsCollection
+        .aggregate([
+          { $match: { status: "completed" } },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$amount" },
+            },
+          },
+        ])
+        .toArray(),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalUsers,
+        customers,
+        vendors,
+        admins,
+        totalMenuItems,
+        pendingMenuItems,
+        approvedMenuItems,
+        totalTransactions,
+        totalRevenue: revenueResult[0]?.total ?? 0,
+      },
+    });
+  } catch (error) {
+    console.error("Admin Dashboard Stats Error:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard statistics",
+    });
+  }
+};
