@@ -1,5 +1,6 @@
 
 import type { RequestHandler } from "express";
+import { ObjectId } from "mongodb";
 
 import { getDB } from "../config/db.js";
 import type { AuthenticatedUser } from "../middleware/auth.middleware.js";
@@ -7,13 +8,22 @@ import type { AuthenticatedUser } from "../middleware/auth.middleware.js";
 const getUser = (res: Parameters<RequestHandler>[1]) =>
   res.locals.user as AuthenticatedUser;
 
+const getUserFilter = (user: AuthenticatedUser) => ({
+  $or: [
+    { id: user.id },
+    ...(ObjectId.isValid(user.id)
+      ? [{ _id: new ObjectId(user.id) }]
+      : []),
+  ],
+});
+
 // Get logged-in user's profile
 export const getMyProfile: RequestHandler = async (_req, res) => {
   try {
     const user = getUser(res);
 
     const profile = await getDB().collection("user").findOne(
-      { id: user.id },
+      getUserFilter(user),
       {
         projection: {
           _id: 0,
@@ -60,9 +70,11 @@ export const updateMyProfile: RequestHandler = async (req, res) => {
     const {
       name,
       image,
+      businessName,
     } = req.body as {
       name?: unknown;
       image?: unknown;
+      businessName?: unknown;
     };
 
     const updates: Record<string, string | Date> = {};
@@ -99,10 +111,34 @@ export const updateMyProfile: RequestHandler = async (req, res) => {
       updates.image = image.trim();
     }
 
+    if (businessName !== undefined) {
+      if (user.role !== "vendor") {
+        res.status(403).json({
+          success: false,
+          message: "Only vendors can update business name",
+        });
+        return;
+      }
+
+      if (
+        typeof businessName !== "string" ||
+        !businessName.trim() ||
+        businessName.trim().length > 100
+      ) {
+        res.status(400).json({
+          success: false,
+          message: "Business name must be between 1 and 100 characters",
+        });
+        return;
+      }
+
+      updates.businessName = businessName.trim();
+    }
+
     if (Object.keys(updates).length === 0) {
       res.status(400).json({
         success: false,
-        message: "Please provide name or image to update",
+        message: "Please provide profile information to update",
       });
       return;
     }
@@ -112,7 +148,7 @@ export const updateMyProfile: RequestHandler = async (req, res) => {
     const result = await getDB()
       .collection("user")
       .updateOne(
-        { id: user.id },
+        getUserFilter(user),
         { $set: updates }
       );
 

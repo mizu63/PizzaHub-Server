@@ -212,16 +212,14 @@ interface TransactionRecord {
 
 // Admin: Get All Transactions
 export const getAllTransactions: RequestHandler = async (
-  req,
+  _req,
   res
 ) => {
   try {
     const db = getDB();
 
-    const transactionsCollection =
-      db.collection<TransactionRecord>("transactions");
-
-    const transactions = await transactionsCollection
+    const transactions = await db
+      .collection<TransactionRecord>("transactions")
       .find({})
       .sort({ createdAt: -1 })
       .toArray();
@@ -230,27 +228,27 @@ export const getAllTransactions: RequestHandler = async (
       ...new Set(transactions.map((item) => item.vendorId)),
     ];
 
+    const validObjectIds = vendorIds
+      .filter((id) => ObjectId.isValid(id))
+      .map((id) => new ObjectId(id));
+
     const vendors = await db
       .collection("user")
-      .find(
-        { id: { $in: vendorIds } },
-        {
-          projection: {
-            name: 1,
-            email: 1,
-            businessName: 1,
-          },
-        }
-      )
+      .find({
+        $or: [
+          { id: { $in: vendorIds } },
+          { _id: { $in: validObjectIds } },
+        ],
+      })
       .toArray();
 
     const vendorMap = new Map(
       vendors.map((vendor) => [
-        vendor.id,
+        vendor._id?.toString() || vendor.id,
         {
-          name: vendor.name,
-          email: vendor.email,
-          businessName: vendor.businessName,
+          name: vendor.name || "Unknown Vendor",
+          email: vendor.email || "N/A",
+          businessName: vendor.businessName || "N/A",
         },
       ])
     );
@@ -258,7 +256,12 @@ export const getAllTransactions: RequestHandler = async (
     const formattedTransactions = transactions.map(
       (transaction) => ({
         ...transaction,
-        vendor: vendorMap.get(transaction.vendorId) || null,
+        vendor:
+          vendorMap.get(transaction.vendorId) || {
+            name: "Unknown Vendor",
+            email: "N/A",
+            businessName: "N/A",
+          },
       })
     );
 
@@ -276,3 +279,88 @@ export const getAllTransactions: RequestHandler = async (
     });
   }
 };
+
+
+
+
+
+
+
+// interface TransactionRecord {
+//   _id: ObjectId;
+//   vendorId: string;
+//   plan: string;
+//   amount: number;
+//   currency: string;
+//   stripeSessionId: string;
+//   stripeSubscriptionId: string;
+//   status: string;
+//   createdAt: Date;
+// }
+
+// // Admin: Get All Transactions
+// export const getAllTransactions: RequestHandler = async (
+//   req,
+//   res
+// ) => {
+//   try {
+//     const db = getDB();
+
+//     const transactionsCollection =
+//       db.collection<TransactionRecord>("transactions");
+
+//     const transactions = await transactionsCollection
+//       .find({})
+//       .sort({ createdAt: -1 })
+//       .toArray();
+
+//     const vendorIds = [
+//       ...new Set(transactions.map((item) => item.vendorId)),
+//     ];
+
+//     const vendors = await db
+//       .collection("user")
+//       .find(
+//         { id: { $in: vendorIds } },
+//         {
+//           projection: {
+//             name: 1,
+//             email: 1,
+//             businessName: 1,
+//           },
+//         }
+//       )
+//       .toArray();
+
+//     const vendorMap = new Map(
+//       vendors.map((vendor) => [
+//         vendor.id,
+//         {
+//           name: vendor.name,
+//           email: vendor.email,
+//           businessName: vendor.businessName,
+//         },
+//       ])
+//     );
+
+//     const formattedTransactions = transactions.map(
+//       (transaction) => ({
+//         ...transaction,
+//         vendor: vendorMap.get(transaction.vendorId) || null,
+//       })
+//     );
+
+//     res.status(200).json({
+//       success: true,
+//       total: formattedTransactions.length,
+//       data: formattedTransactions,
+//     });
+//   } catch (error) {
+//     console.error("Admin Get Transactions Error:", error);
+
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch transactions",
+//     });
+//   }
+// };
