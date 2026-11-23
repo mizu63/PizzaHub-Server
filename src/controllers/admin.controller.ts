@@ -49,6 +49,8 @@ export const getAllMenuItemsForAdmin: RequestHandler = async (
 };
 
 // Admin: Update menu item status
+
+// Admin: Update menu item status
 export const updateMenuItemStatus: RequestHandler = async (
   req,
   res
@@ -86,9 +88,88 @@ export const updateMenuItemStatus: RequestHandler = async (
       return;
     }
 
-    const result = await getMenuCollection().updateOne(
+    const menuCollection = getMenuCollection();
+    const menuItemId = new ObjectId(id);
+
+    // Find menu item
+    const menuItem = await menuCollection.findOne({
+      _id: menuItemId,
+    });
+
+    if (!menuItem) {
+      res.status(404).json({
+        success: false,
+        message: "Menu item not found",
+      });
+      return;
+    }
+
+    // Check limit only when a new approval is requested
+    if (status === "approved" && menuItem.status !== "approved") {
+      const vendorId = menuItem.vendorId;
+
+      const vendorConditions: Record<string, unknown>[] = [
+        { id: vendorId },
+      ];
+
+      if (ObjectId.isValid(vendorId)) {
+        vendorConditions.push({
+          _id: new ObjectId(vendorId),
+        });
+      }
+
+      // Find vendor
+      const vendor = await getDB()
+        .collection("user")
+        .findOne({
+          $or: vendorConditions,
+          role: "vendor",
+        });
+
+      if (!vendor) {
+        res.status(404).json({
+          success: false,
+          message: "Vendor account not found",
+        });
+        return;
+      }
+
+      // Check active premium subscription
+      const expiresAt = vendor.subscriptionExpiresAt
+        ? new Date(vendor.subscriptionExpiresAt as string | number)
+        : null;
+
+      const isPremium =
+        vendor.subscriptionPlan === "premium" &&
+        expiresAt !== null &&
+        !Number.isNaN(expiresAt.getTime()) &&
+        expiresAt.getTime() > Date.now();
+
+      // Free plan: maximum 3 approved items
+      if (!isPremium) {
+        const approvedCount = await menuCollection.countDocuments({
+          vendorId,
+          status: "approved",
+        });
+
+        if (approvedCount >= 3) {
+          res.status(403).json({
+            success: false,
+            message:
+              "Free plan allows only 3 approved menu items. Upgrade to Premium for unlimited menu items.",
+            approvedCount,
+            limit: 3,
+            subscriptionPlan: "free",
+          });
+          return;
+        }
+      }
+    }
+
+    // Update menu item status
+    const result = await menuCollection.updateOne(
       {
-        _id: new ObjectId(id),
+        _id: menuItemId,
       },
       {
         $set: {
