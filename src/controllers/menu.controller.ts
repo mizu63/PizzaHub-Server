@@ -16,28 +16,52 @@ const getMenuCollection = () =>
   getDB().collection<MenuItem>("menuItems");
 
 // Get all approved menu items with search, filter and sorting
-export const getAllMenuItems: RequestHandler = async (
-  req,
-  res
-) => {
+
+// Get all approved menu items with search, filter and sorting
+export const getAllMenuItems: RequestHandler = async (req, res) => {
   try {
-    const { search, category, sort } = req.query;
+    const { search, category, location, sort } = req.query;
 
     const filter: Record<string, unknown> = {
       status: "approved",
     };
 
+    // Escape special regex characters
+    const escapeRegex = (value: string) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Search by item name, category, location and description
     if (typeof search === "string" && search.trim()) {
-      filter.itemName = {
-        $regex: search.trim(),
+      const searchRegex = {
+        $regex: escapeRegex(search.trim()),
+        $options: "i",
+      };
+
+      filter.$or = [
+        { itemName: searchRegex },
+        { category: searchRegex },
+        { location: searchRegex },
+        { description: searchRegex },
+      ];
+    }
+
+    // Filter by category
+    if (typeof category === "string" && category.trim()) {
+      filter.category = {
+        $regex: `^${escapeRegex(category.trim())}$`,
         $options: "i",
       };
     }
 
-    if (typeof category === "string" && category.trim()) {
-      filter.category = category.trim();
+    // Filter by location
+    if (typeof location === "string" && location.trim()) {
+      filter.location = {
+        $regex: escapeRegex(location.trim()),
+        $options: "i",
+      };
     }
 
+    // Price sorting
     let sortOption: Record<string, 1 | -1> = {
       createdAt: -1,
     };
@@ -67,6 +91,7 @@ export const getAllMenuItems: RequestHandler = async (
     });
   }
 };
+
 
 // Get single menu item
 export const getMenuItemById: RequestHandler = async (
