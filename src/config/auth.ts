@@ -71,7 +71,7 @@ export const auth = betterAuth({
         type: ["customer", "vendor", "admin"],
         required: false,
         defaultValue: "customer",
-        input: true,
+        input: false,
       },
 
       isBlocked: {
